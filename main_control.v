@@ -55,6 +55,8 @@ module main_control (
                 RegWrite = 1'b1; 
                 ALUOp    = 2'b00; 
             end
+            
+            
 
             default: begin
                 // If the opcode is unknown, defaults apply (everything 0).
