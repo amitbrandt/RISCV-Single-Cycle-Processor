@@ -4,15 +4,7 @@ Project Overview:
 This repository contains a Verilog implementation of a 32-bit single-cycle RISC-V CPU core. The design follows the RV32I ISA subset, focusing on the core execution stages: Fetch, Decode, Execute, Memory, and Write-back.
 The processor is designed for modularity, with separate units for ALU control, immediate generation, and register management.
 
-The current implementation supports the following instruction types:
-
-R-type: Arithmetic operations between registers (e.g., ADD).
-
-I-type: Operations with immediate values (e.g., ADDI).
-
-S-type: Memory store operations (e.g., SW).
-
-B-type: Conditional branching (e.g., BEQ).
+Successfully implemented and verified: R-type (ADD), I-type (ADDI, LW), S-type (SW), and B-type (BEQ) instructions.
 
 Architecture and Design:
 
