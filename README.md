@@ -26,7 +26,7 @@ To provide a clear understanding of the processor's internal structure and logic
 ### 1. Logical Datapath (Academic View)
 This schematic is based on the **RISC-V Edition of "Computer Organization and Design" (Patterson & Hennessy)**. It provides a conceptual view of the instruction flow and control signals.
 
-![Academic Schematic](schematic_academic.png)
+![Academic Schematic](schematic_academic..png)
 
 ---
 
