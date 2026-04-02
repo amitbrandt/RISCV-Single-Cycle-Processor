@@ -1,52 +1,60 @@
-# RISC-V Single-Cycle Processor Implementation
+# RISC-V 5-Stage Pipelined Processor Implementation
 
-## Project Overview
-This repository contains a Verilog implementation of a 32-bit single-cycle RISC-V CPU core. The design follows the **RV32I ISA** subset, focusing on the core execution stages: Fetch, Decode, Execute, Memory, and Write-back.
+### Project Overview
 
-The processor is designed for modularity, featuring separate units for `ALU control`, `immediate generation`, and `register management`.
+This repository contains a Verilog implementation of a **32-bit 5-stage pipelined** RISC-V CPU core. The design follows the **RV32I ISA** subset and handles instruction execution through a classic pipeline: Fetch (IF), Decode (ID), Execute (EX), Memory (MEM), and Write-back (WB).
+The processor is optimized for performance and reliability, featuring dedicated units for **Forwarding** and **Hazard Detection** to ensure data integrity across the pipeline stages.
 
-### Successfully Implemented Instructions:
-* **R-type:** `ADD`
-* **I-type:** `ADDI`, `LW`
-* **S-type:** `SW`
-* **B-type:** `BEQ`
+**Successfully Implemented Instructions:**
+* **R-type:** ADD
+* **I-type:** ADDI, LW
+* **S-type:** SW
+* **B-type:** BEQ
 
----
+### Architecture and Design
 
-## Architecture and Design
-* **Control Unit:** Decodes the 7-bit opcode to manage control signals for the ALU, Register File, and Data Memory.
-* **ALU:** 32-bit arithmetic logic unit providing results and a zero flag used for conditional branches.
-* **Branching Mechanism:** Target addresses are calculated using a 1-bit left shift on the immediate value to ensure proper half-word alignment, as per RISC-V specifications.
-* **Memory Architecture:** Implements a Harvard-style architecture with separate instruction and data memory modules.
+* **Pipelined Control Unit:** Decodes instructions in the ID stage and propagates control signals through pipeline registers to manage EX, MEM, and WB stages.
+* **Forwarding Unit:** Resolves RAW (Read-After-Write) hazards by directing data from EX/MEM and MEM/WB registers back to the ALU inputs, minimizing pipeline stalls.
+* **Hazard Detection & Stalling:** Automatically detects Load-Use hazards and stalls the pipeline for one cycle. It also manages pipeline flushes during taken branches to prevent incorrect instruction execution.
+* **Memory Architecture:** Implements a Harvard-style architecture with separate instruction and data memory, integrated with pipeline registers for synchronized access.
 
-## System Architecture
+### System Architecture
 
 To provide a clear understanding of the processor's internal structure and logic flow, two types of diagrams are provided:
 
-### 1. Logical Datapath (Academic View)
-This schematic is based on the **RISC-V Edition of "Computer Organization and Design" (Patterson & Hennessy)**. It provides a conceptual view of the instruction flow and control signals.
+**1. Logical Datapath (Academic View)**
+This schematic reflects the 5-stage pipeline architecture with forwarding paths and hazard units, based on the RISC-V Edition of "Computer Organization and Design" (Patterson & Hennessy).
 
 ![Academic Schematic](schematic_academic..png)
 
 ---
 
-### 2. RTL Schematic (Hardware View)
-This is the actual **Vivado RTL Analysis Schematic** generated from the Verilog source code, showing how the modules are synthesized into hardware logic.
+**2. RTL Schematic (Hardware View)**
+The actual Vivado RTL Analysis Schematic generated from the synthesized Verilog code, showing the implementation of pipeline registers (IF/ID, ID/EX, EX/MEM, MEM/WB) and control logic.
 
 ![Vivado Schematic](schematic_vivado.png)
 ---
 
-## Simulation and Verification
-Verification was performed using the **Vivado Simulator** environment.
+### Simulation and Verification
 
-### Test Program Example
-The following sequence was used to verify data flow and branching:
+Verification was performed using the **Vivado Simulator** environment, confirming the correct handling of data forwarding and branch flushes.
+
+**Test Program Example**
+The following sequence was used to verify the pipeline's ability to handle data flow, control hazards, and memory operations:
 ```assembly
-addi x1, x0, 5      # Initialize x1
-addi x2, x0, 5      # Initialize x2
-beq x1, x2, 8       # Jump if equal (skips next instruction)
-addi x3, x0, 9      # Should be skipped
-sw x1, 0(x0)        # Store value to memory
-lw x5, 0(x0)        # Load value back to register x5
+#Forwarding (ALU to ALU)
+addi x1, x0, 10     
+addi x2, x1, 5      
+add  x3, x2, x1      
+
+#Load-Use Hazard (Stall)
+sw   x3, 0(x0)      
+lw   x4, 0(x0)      
+addi x5, x4, 1       
+
+#Branch ו-Flush
+beq  x1, x1, 8      
+addi x6, x0, 99      
+addi x7, x0, 1      
 
 
