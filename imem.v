@@ -6,27 +6,28 @@ module imem (
 );
 
     // --- Memory Array ---
-    // Define a memory array named 'RAM'. 
     reg [31:0] RAM [63:0];
-    
-  initial begin
-RAM[0] = 32'h00500093; // addi x1, x0, 5  (כתובת 0)
-RAM[1] = 32'h00500113; // addi x2, x0, 5  (כתובת 4)
-RAM[2] = 32'h00208463; // beq x1, x2, 8   (כתובת 8 - קופץ 8 בתים קדימה לכתובת 16)
-RAM[3] = 32'h00900193; // addi x3, x0, 9  (כתובת 12 / c בהקסה - המעבד *אמור לדלג* על זה!)
-RAM[4] = 32'h00208233; // add x4, x1, x2  (כתובת 16 / 10 בהקסה - פקודת המטרה! מתבצעת לאחר הקפיצה)
-RAM[5] = 32'h01400093; // addi x1, x0, 20  (x1 = 20)
-RAM[6] = 32'h00102023; // sw x1, 0(x0)      (Memory[0] = 20)
-RAM[7] = 32'h00002283; // lw x5, 0(x0)      (x5 = Memory[0] -> אמור לקבל 20)
-RAM[8] = 32'h00508333; // add x6, x1, x5    (x6 = 20 + 20 = 40 / 28 hex)
- 
-    end
-    
+  
+    integer i;
+    initial begin
+        // Initialize memory with NOPs (addi x0, x0, 0)
+        for (i = 0; i < 64; i = i + 1) begin
+            RAM[i] = 32'h00000013; 
+        end
+
+        // Test instructions
+        RAM[0] = 32'h00a00093; // addi x1, x0, 10
+        RAM[1] = 32'h00508113; // addi x2, x1, 5
+        RAM[2] = 32'h001101b3; // add  x3, x2, x1
+        RAM[3] = 32'h00302023; // sw   x3, 0(x0)
+        RAM[4] = 32'h00002203; // lw   x4, 0(x0)
+        RAM[5] = 32'h00120293; // addi x5, x4, 1
+        RAM[6] = 32'h00b58463; // beq  x1, x1, 8
+        RAM[7] = 32'h06300313; // addi x6, x0, 99
+        RAM[8] = 32'h00100393; // addi x7, x0, 1
+    end // Added missing end for initial block
 
     // --- Combinational Read ---
-    // Read the value from 'RAM' at the index specified by A[31:2] 
-    // and assign it continuously to the output RD.
     assign RD = RAM[A[31:2]];
-    
 
 endmodule

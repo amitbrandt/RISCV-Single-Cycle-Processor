@@ -5,136 +5,179 @@ module riscv_core (
     input  wire reset
 );
 
-    // 1. Fetch Stage Wires Declaration
-    wire [31:0] pc_current;
-    wire [31:0] pc_next;
-    wire [31:0] pc_plus_4;
-    wire [31:0] instruction;
+    // --- Control & Hazard Wires ---
+    wire stall, if_id_flush, branch_taken;
+    wire [1:0] forward_a, forward_b;
 
-    // The PC is a simple register (Flip-Flop) that holds the current address.
-    // On reset, it clears to 0. Otherwise, it gets the next address on every clock edge.
-    reg [31:0] PC_reg;
+    // -------------------------------------------------------------------------
+    // 1. FETCH STAGE (IF)
+    // -------------------------------------------------------------------------
+    wire [31:0] pc_current, pc_next, pc_plus_4, instr_raw;
+    reg  [31:0] PC_reg;
     
     always @(posedge clk or posedge reset) begin
-        if (reset)
-            PC_reg <= 32'b0;
-        else
-            PC_reg <= pc_next; 
+        if (reset) PC_reg <= 32'b0;
+        else if (!stall) PC_reg <= pc_next; 
     end
     
-    // Connect the PC register to our wire
     assign pc_current = PC_reg;
-    
-    // Calculate the regular next address (PC + 4)
     assign pc_plus_4 = pc_current + 32'd4;
-
+    assign pc_next = (branch_taken) ? (pc_id + (imm_id << 1)) : pc_plus_4;
 
     imem instruction_memory (
-        .A(pc_current),       // Connect current PC address to memory input
-        .RD(instruction)      // The fetched 32-bit instruction goes into our wire
+        .A(pc_current),
+        .RD(instr_raw)
     );
 
-    // Decode Stage Wires Declaration
-    wire       Branch;
-    wire       MemRead;
-    wire       MemtoReg;
-    wire [1:0] ALUOp;
-    wire       MemWrite;
-    wire       ALUSrc;
-    wire       RegWrite;
-    // Data Wires from Register File and ImmGen
-    wire [31:0] read_data1;
-    wire [31:0] read_data2;
-    wire [31:0] imm_out;
-    // Write Back wire 
-    wire [31:0] write_data;
+    // IF/ID REGISTER
+    wire [31:0] instr_id, pc_id;
+    IF_ID_reg if_id_inst (
+        .clk(clk), .rst_n(!reset), 
+        .flush(if_id_flush), .stall(stall),
+        .pc_in(pc_current), .instr_in(instr_raw),
+        .pc_out(pc_id), .instr_out(instr_id)
+    );
 
-    // Main Control Unit Instantiation
-    // Extracting opcode directly from the instruction wire: instruction[6:0]
+    // -------------------------------------------------------------------------
+    // 2. DECODE STAGE (ID)
+    // -------------------------------------------------------------------------
+    wire Branch_id, MemRead_id, MemtoReg_id, MemWrite_id, ALUSrc_id, RegWrite_id;
+    wire [1:0] ALUOp_id;
+    wire [3:0] alu_ctrl_id;
+    wire [31:0] rd1_id, rd2_id, imm_id;
+
     main_control ctrl_unit (
-        .opcode   (instruction[6:0]),
-        .Branch   (Branch),
-        .MemRead  (MemRead),
-        .MemtoReg (MemtoReg),
-        .ALUOp    (ALUOp),
-        .MemWrite (MemWrite),
-        .ALUSrc   (ALUSrc),
-        .RegWrite (RegWrite)
+        .opcode(instr_id[6:0]), .Branch(Branch_id), .MemRead(MemRead_id),
+        .MemtoReg(MemtoReg_id), .ALUOp(ALUOp_id), .MemWrite(MemWrite_id),
+        .ALUSrc(ALUSrc_id), .RegWrite(RegWrite_id)
     );
 
-
-    // Extracting register numbers from the instruction wire:
-    // rs1 = instruction[19:15]
-    // rs2 = instruction[24:20]
-    // rd  = instruction[11:7]
     regfile reg_file (
-        .clk        (clk),
-        .we         (RegWrite),           // Write Enable controlled by Main Control
-        .a1  (instruction[19:15]),
-        .a2  (instruction[24:20]),
-        .a3 (instruction[11:7]),
-        .wd3 (write_data),         // Placeholder: will be connected in Write Back stage
-        .rd1 (read_data1),
-        .rd2 (read_data2)
+        .clk(clk), .we(reg_write_wb), 
+        .a1(instr_id[19:15]), .a2(instr_id[24:20]),
+        .a3(rd_addr_wb), .wd3(write_data_wb),
+        .rd1(rd1_id), .rd2(rd2_id)
     );
 
-    //Immediate Generator Instantiation
     imm_gen imm_generator (
-        .inst     (instruction),
-        .imm_out  (imm_out)
-    );
-    
-    // Stage Wires Declaration
-    wire [3:0]  alu_operation;
-    wire [31:0] alu_input_b;
-    wire [31:0] alu_result;
-    wire        alu_zero;
-
-    // ALU Control Instantiation
-    // Extracting funct3 (bits 14:12) and funct7_bit5 (bit 30) from the instruction.
-    alu_control alu_ctrl (
-        .ALUOp       (ALUOp),
-        .funct3      (instruction[14:12]),
-        .funct7_bit5 (instruction[30]),
-        .Operation   (alu_operation)
+        .inst(instr_id), .imm_out(imm_id)
     );
 
-    // ALU Input B Multiplexer (MUX)
-    // This MUX chooses between register data 2 and the immediate value.
-    // If ALUSrc == 1, choose immediate. If ALUSrc == 0, choose register 2.
-    assign alu_input_b = (ALUSrc) ? imm_out : read_data2;
+    branch_control br_unit (
+        .branch_id(Branch_id), .rd1_id(rd1_id), .rd2_id(rd2_id),
+        .branch_taken(branch_taken), .if_id_flush(if_id_flush)
+    );
 
-    //  ALU Instantiation
+    alu_control alu_ctrl_unit (
+        .ALUOp(ALUOp_id), .funct3(instr_id[14:12]), 
+        .funct7_bit5(instr_id[30]), .Operation(alu_ctrl_id)
+    );
+
+    hazard_detection hazard_unit (
+        .rs1_id(instr_id[19:15]), .rs2_id(instr_id[24:20]),
+        .rd_ex(rd_addr_ex), .mem_read_ex(mem_read_ex),
+        .stall(stall)
+    );
+
+    // ID/EX REGISTER
+    wire [31:0] pc_ex, rd1_ex, rd2_ex, imm_ex;
+    wire [4:0]  rd_addr_ex, rs1_ex, rs2_ex;
+    wire [3:0]  alu_ctrl_ex;
+    wire        alu_src_ex, mem_write_ex, mem_read_ex, reg_write_ex, mem_to_reg_ex;
+
+    ID_EX_reg id_ex_inst (
+        .clk(clk), .rst_n(!reset), 
+        .flush(stall), .stall(1'b0),
+        .pc_in(pc_id), 
+        .rs1_data_in(rd1_id), 
+        .rs2_data_in(rd2_id),
+        .imm_in(imm_id), 
+        .rd_addr_in(instr_id[11:7]), 
+        .alu_ctrl_in(alu_ctrl_id),
+        .rs1_in(instr_id[19:15]),
+        .rs2_in(instr_id[24:20]),
+        .alu_src_in(ALUSrc_id), .mem_write_in(MemWrite_id), .mem_read_in(MemRead_id),
+        .reg_write_in(RegWrite_id), .mem_to_reg_in(MemtoReg_id),
+        
+        .pc_out(pc_ex), .rs1_data_out(rd1_ex), .rs2_data_out(rd2_ex),
+        .imm_out(imm_ex), .rd_addr_out(rd_addr_ex), .alu_ctrl_out(alu_ctrl_ex),
+        .rs1_out(rs1_ex), .rs2_out(rs2_ex),
+        .alu_src_out(alu_src_ex), .mem_write_out(mem_write_out_ex), .mem_read_out(mem_read_out_ex),
+        .reg_write_out(reg_write_out_ex), .mem_to_reg_out(mem_to_reg_out_ex)
+    );
+
+    // Internal mapping for control signals out of ID_EX
+    assign mem_write_ex = mem_write_out_ex;
+    assign mem_read_ex = mem_read_out_ex;
+    assign reg_write_ex = reg_write_out_ex;
+    assign mem_to_reg_ex = mem_to_reg_out_ex;
+
+    // -------------------------------------------------------------------------
+    // 3. EXECUTE STAGE (EX)
+    // -------------------------------------------------------------------------
+    wire [31:0] forward_a_mux_out, forward_b_mux_out, alu_input_b, alu_result_ex;
+
+    assign forward_a_mux_out = (forward_a == 2'b10) ? alu_result_mem :
+                               (forward_a == 2'b01) ? write_data_wb  : rd1_ex;
+
+    assign forward_b_mux_out = (forward_b == 2'b10) ? alu_result_mem :
+                               (forward_b == 2'b01) ? write_data_wb  : rd2_ex;
+
+    assign alu_input_b = (alu_src_ex) ? imm_ex : forward_b_mux_out;
+
     alu main_alu (
-        .A       (read_data1),
-        .B       (alu_input_b),    // The output from our MUX
-        .ALUControl  (alu_operation),  // The 4-bit command from ALU Control
-        .Result  (alu_result),
-        .Zero    (alu_zero)
+        .A(forward_a_mux_out), .B(alu_input_b), .ALUControl(alu_ctrl_ex),
+        .Result(alu_result_ex), .Zero()
     );
-    // Memory Stage Wires
-    wire [31:0] mem_read_data;
 
-    // Data Memory (DMEM) Instantiation
+    forwarding_unit fwd_unit (
+        .rs1_ex(rs1_ex), .rs2_ex(rs2_ex), .rd_mem(rd_addr_mem), .rd_wb(rd_addr_wb),
+        .reg_write_mem(reg_write_mem), .reg_write_wb(reg_write_wb),
+        .forward_a(forward_a), .forward_b(forward_b)
+    );
+
+    // EX/MEM REGISTER
+    wire [31:0] alu_result_mem, rd2_mem;
+    wire [4:0]  rd_addr_mem;
+    wire        mem_write_mem, mem_read_mem, reg_write_mem, mem_to_reg_mem;
+
+    EX_MEM_reg ex_mem_inst (
+        .clk(clk), .rst_n(!reset), .flush(1'b0), .stall(1'b0),
+        .alu_result_in(alu_result_ex), .rs2_data_in(forward_b_mux_out), .rd_addr_in(rd_addr_ex),
+        .mem_write_in(mem_write_ex), .mem_read_in(mem_read_ex),
+        .reg_write_in(reg_write_ex), .mem_to_reg_in(mem_to_reg_ex),
+        .alu_result_out(alu_result_mem), .rs2_data_out(rd2_mem), .rd_addr_out(rd_addr_mem),
+        .mem_write_out(mem_write_mem), .mem_read_out(mem_read_mem),
+        .reg_write_out(reg_write_mem), .mem_to_reg_out(mem_to_reg_mem)
+    );
+
+    // -------------------------------------------------------------------------
+    // 4. MEMORY STAGE (MEM)
+    // -------------------------------------------------------------------------
+    wire [31:0] mem_data_mem;
+
     dmem data_memory (
-        .clk (clk),
-        .WE  (MemWrite),
-        .A   (alu_result),
-        .WD  (read_data2),
-        .RD  (mem_read_data)
+        .clk(clk), .WE(mem_write_mem), .A(alu_result_mem),
+        .WD(rd2_mem), .RD(mem_data_mem)
     );
 
-    // Write Back MUX: Choose between Memory Data and ALU Result
-    assign write_data = (MemtoReg) ? mem_read_data : alu_result;
+    // MEM/WB REGISTER
+    wire [31:0] alu_result_wb, mem_data_wb;
+    wire [4:0]  rd_addr_wb;
+    wire        reg_write_wb, mem_to_reg_wb;
 
-    // Branch Logic & PC Next Calculation
-    wire [31:0] branch_target;
-    wire        branch_taken;
+    MEM_WB_reg mem_wb_inst (
+        .clk(clk), .rst_n(!reset), .flush(1'b0), .stall(1'b0),
+        .alu_result_in(alu_result_mem), .mem_read_data_in(mem_data_mem), .rd_addr_in(rd_addr_mem),
+        .reg_write_in(reg_write_mem), .mem_to_reg_in(mem_to_reg_mem),
+        .alu_result_out(alu_result_wb), .mem_read_data_out(mem_data_wb), .rd_addr_out(rd_addr_wb),
+        .reg_write_out(reg_write_wb), .mem_to_reg_out(mem_to_reg_wb)
+    );
 
-    assign branch_target = pc_current + (imm_out << 1);
-    assign branch_taken  = Branch & alu_zero;
-
-    // PC Next MUX: Choose between Branch Target and PC+4
-    assign pc_next = (branch_taken) ? branch_target : pc_plus_4;
+    // -------------------------------------------------------------------------
+    // 5. WRITE BACK STAGE (WB)
+    // -------------------------------------------------------------------------
+    wire [31:0] write_data_wb;
+    assign write_data_wb = (mem_to_reg_wb) ? mem_data_wb : alu_result_wb;
 
 endmodule

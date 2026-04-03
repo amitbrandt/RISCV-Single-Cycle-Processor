@@ -9,7 +9,7 @@
 module alu(
     input  wire [31:0] A,// First operand (usually from rs1)
     input  wire [31:0] B, // Second operand (from rs2 or immediate value)
-    input  wire [2:0]  ALUControl,// Operation selector:
+    input  wire [3:0]  ALUControl,// Operation selector:
                                  // 000 = ADD, 001 = SUB, 010 = AND, 011 = OR
     output reg  [31:0] Result,// 32-bit computation result
     output wire        Zero // 1 if Result is exactly zero
